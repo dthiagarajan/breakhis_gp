@@ -82,7 +82,7 @@ def train(epoch):
         loss = -mll(output, label)
         loss.backward()
         optimizer.step()
-        print('Train Epoch: %d [%03d/%03d], Loss: %.6f' % (epoch, batch_idx + 1, len(TrainImgLoader), loss.item()))
+        print('Train Epoch: %d [%03d/%03d], Loss: %.6f' % (epoch, batch_idx + 1, len(TrainImgLoader), loss.item()), flush=True)
 
 for epoch in range(1, args.epochs + 1):
     scheduler.step()
