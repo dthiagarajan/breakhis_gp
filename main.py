@@ -15,14 +15,13 @@ import math
 from dataloader import BreaKHis_v1Lister as lister
 from dataloader import BreaKHis_v1Loader as DA
 from model import *
+from torchvision.models import *
 from torchvision import transforms
 
 parser = argparse.ArgumentParser(description='PSMNet')
-parser.add_argument('--maxdisp', type=int ,default=192,
-                    help='maxium disparity')
 parser.add_argument('--datapath', default='/scratch/datasets/BreaKHis_v1/histology_slides/breast/',
                     help='datapath')
-parser.add_argument('--epochs', type=int, default=10,
+parser.add_argument('--epochs', type=int, default=300,
                     help='number of epochs to train')
 parser.add_argument('--loadmodel', default= None,
                     help='load model')
@@ -51,28 +50,44 @@ TrainImgLoader = torch.utils.data.DataLoader(
     DA.ImageFolder(images, all_params, labels, True, transform=transform),
     batch_size= 8, shuffle= True, num_workers= 0, drop_last=False)
 
+feature_extractor = ResNetFeatureExtractor(resnet18).cuda()
+num_features = 1000 # from ImageNet
+model = DKLModel(feature_extractor, num_dim=num_features).cuda()
 
-model = PreActResNet18(num_classes=2)
 if args.cuda:
-    model = nn.DataParallel(model)
     model.cuda()
-criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(list(model.parameters()), lr=0.001,
-                      momentum=0.9, weight_decay=5e-4, nesterov=True)
-model.train()
-for epoch in range(args.epochs):
-    total_train_loss = 0.
+
+lr = 0.1
+likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=model.num_dim, n_classes=2).cuda()
+optimizer = optim.SGD([
+    {'params': model.feature_extractor.parameters()},
+    {'params': model.gp_layer.hyperparameters(), 'lr': lr * 0.01},
+    {'params': model.gp_layer.variational_parameters()},
+    {'params': likelihood.parameters()},
+], lr=lr, momentum=0.9, nesterov=True, weight_decay=0)
+scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[0.5 * args.epochs, 0.75 * args.epochs], gamma=0.1)
+
+def train(epoch):
+    model.train()
+    likelihood.train()
+    
+    mll = gpytorch.mlls.VariationalELBO(likelihood, model.gp_layer, num_data=len(TrainImgLoader))
+    train_loss = 0.
     for batch_idx, (image, params, label) in enumerate(TrainImgLoader):
-        optimizer.zero_grad()
         start_time = time.time()
-        image = Variable(torch.FloatTensor(image))
-        label = Variable(torch.LongTensor(label))
         if args.cuda:
             image, label = image.cuda(), label.cuda()
-        pred = model(image)
-        loss = criterion(pred, label)
+        optimizer.zero_grad()
+        output = model(image)
+        loss = -mll(output, label)
         loss.backward()
         optimizer.step()
-        print('Iter %d training loss = %.3f , time = %.2f' % (batch_idx, loss, time.time() - start_time), flush=True)
-        total_train_loss += float(loss)
-    print('Epoch %d total training loss = %.3f' % (epoch, total_train_loss/len(TrainImgLoader)))
+        print('Train Epoch: %d [%03d/%03d], Loss: %.6f' % (epoch, batch_idx + 1, len(TrainImgLoader), loss.item()))
+
+for epoch in range(1, args.epochs + 1):
+    scheduler.step()
+    with gpytorch.settings.use_toeplitz(False), gpytorch.settings.max_preconditioner_size(0):
+        train(epoch)
+    state_dict = model.state_dict()
+    likelihood_state_dict = likelihood.state_dict()
+    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, 'dkl_cifar_checkpoint.dat')
