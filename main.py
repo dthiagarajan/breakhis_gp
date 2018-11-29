@@ -18,6 +18,7 @@ from dataloader import BreaKHis_v1Loader as DA
 from model import *
 from torchvision.models import *
 from torchvision import transforms
+from tqdm import tqdm
 
 parser = argparse.ArgumentParser(description='PSMNet')
 parser.add_argument('--datapath', default='/home/dthiagar/datasets/BreaKHis_v1/histology_slides/breast/',
@@ -64,8 +65,8 @@ transform = transforms.Compose([
         p.torch_transform(),
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize((0.4914, 0.4822, 0.4465),
-                             (0.2023, 0.1994, 0.2010)),
+        transforms.Normalize((0.7879, 0.6272, 0.7653),
+                             (0.1215, 0.1721, 0.1058)),
 ])
 print(len(train_images))
 print(len(test_images))
@@ -89,10 +90,10 @@ lr = 0.001
 likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=model.num_dim, n_classes=2).cuda()
 optimizer = optim.RMSprop([
     {'params': model.feature_extractor.parameters()},
-    {'params': model.gp_layer.hyperparameters(), 'lr': lr * 0.1},
+    {'params': model.gp_layer.hyperparameters(), 'lr': lr * 0.01},
     {'params': model.gp_layer.variational_parameters()},
     {'params': likelihood.parameters()},
-], lr=lr, weight_decay=0.9)
+], lr=lr, weight_decay=0.9, centered=True)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[0.75 * args.epochs], gamma=0.1)
 
 def train(epoch):
@@ -117,7 +118,7 @@ def test():
     likelihood.eval()
 
     correct = 0  
-    for image, params, label in TestImgLoader:
+    for image, params, label in tqdm(TestImgLoader):
         if args.cuda:
             image, label = image.cuda(), label.cuda()    
         with torch.no_grad():
