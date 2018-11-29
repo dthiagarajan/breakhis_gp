@@ -58,7 +58,6 @@ p.rotate90(probability=1)
 p.rotate270(probability=1)
 p.flip_top_bottom(probability=0.8)
 p.crop_random(probability=1, percentage_area=0.5)
-p.resize(probability=1.0, width=120, height=120)
 
 
 transform = transforms.Compose([
@@ -90,7 +89,7 @@ lr = 0.001
 likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=model.num_dim, n_classes=2).cuda()
 optimizer = optim.RMSprop([
     {'params': model.feature_extractor.parameters()},
-    {'params': model.gp_layer.hyperparameters(), 'lr': lr * 0.01},
+    {'params': model.gp_layer.hyperparameters()},
     {'params': model.gp_layer.variational_parameters()},
     {'params': likelihood.parameters()},
 ], lr=lr, weight_decay=0.9, centered=True)
