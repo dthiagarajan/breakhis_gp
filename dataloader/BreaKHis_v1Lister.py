@@ -21,7 +21,7 @@ IMG_EXTENSIONS = [
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
 
-def dataloader(filepath, magnification='400X'):
+def dataloader(filepath):
     images = []
     params = []
     labels = []
@@ -31,14 +31,15 @@ def dataloader(filepath, magnification='400X'):
             curr_dir = filepath + cls + '/' + hist
             for sub_dir in os.listdir(curr_dir):
                 slide_num = sub_dir.split('_')[-1]
-                magnification_dir = curr_dir + sub_dir + '/' + magnification + '/'
-                for image in os.listdir(magnification_dir):
-                    attr = {}
-                    attr['slide_num'] = slide_num
-                    attr['magnification'] = magnification
-                    attr['image_num'] = image.split(".")[0][-3:]
-                    image_path = magnification_dir + image
-                    images.append(image_path)
-                    params.append(attr)
-                    labels.append(cls)
+                for magnification in magnifications:
+                    magnification_dir = curr_dir + sub_dir + '/' + magnification + '/'
+                    for image in os.listdir(magnification_dir):
+                        attr = {}
+                        attr['slide_num'] = slide_num
+                        attr['magnification'] = magnification
+                        attr['image_num'] = image.split(".")[0][-3:]
+                        image_path = magnification_dir + image
+                        images.append(image_path)
+                        params.append(attr)
+                        labels.append(cls)
     return images, params, labels

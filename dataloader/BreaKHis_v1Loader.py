@@ -36,10 +36,7 @@ class ImageFolder(data.Dataset):
         params = self.params[index]
         label = 0 if self.labels[index] == 'benign' else 1
 
-        if self.training:
-            return image, params, label
-        else:
-            return image, params
+        return image, params, label
 
     def __len__(self):
         return len(self.images)
