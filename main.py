@@ -80,7 +80,7 @@ TrainImgLoader = torch.utils.data.DataLoader(
 
 TestImgLoader = torch.utils.data.DataLoader(
     DA.ImageFolder(test_images, test_params, test_labels, False, transform=transform),
-    batch_size=1, shuffle=True, num_workers=1, drop_last=False)
+    batch_size=100, shuffle=True, num_workers=1, drop_last=False)
 
 feature_extractor = ResNetFeatureExtractor(resnet50).cuda()
 num_features = feature_extractor.out_dim
@@ -90,15 +90,15 @@ if args.cuda:
     logger.info("Using CUDA")
     model.cuda()
 
-lr = 0.001
+lr = 0.1
 likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=num_features, n_classes=2).cuda()
 optimizer = optim.RMSprop([
-    # {'params': model.feature_extractor.parameters()},
+    # {'params': model.feature_extractor.parameters(), 'lr': lr * 0.01},
     {'params': model.gp_layer.hyperparameters()},
     {'params': model.gp_layer.variational_parameters()},
     {'params': likelihood.parameters()},
 ], lr=lr, weight_decay=0.9, centered=True)
-scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[0.75 * args.epochs], gamma=0.1)
+scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[0.25 * args.epochs, 0.5 * args.epochs, 0.75 * args.epochs], gamma=0.1)
 
 def train(epoch):
     model.train()
