@@ -17,7 +17,7 @@ import math
 from dataloader import BreaKHis_v1Lister as lister
 from dataloader import BreaKHis_v1Loader as DA
 from model import *
-from torchvision.models import *
+from resnet import *
 from torchvision import transforms
 from tqdm import tqdm
 
@@ -27,13 +27,13 @@ console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 
 parser = argparse.ArgumentParser(description='PSMNet')
-parser.add_argument('--datapath', default='/scratch/datasets/BreaKHis_v1/histology_slides/breast/',
+parser.add_argument('--base_dir', default='/home/dthiagar/datasets/',
+                    help='base_dir')
+parser.add_argument('--datapath', default='BreaKHis_v1/histology_slides/breast/',
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=3000,
                     help='number of epochs to train')
-parser.add_argument('--loadmodel', default= None,
-                    help='load model')
-parser.add_argument('--savemodel', default='./',
+parser.add_argument('--checkpoints', default='models/',
                     help='save model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
@@ -46,7 +46,7 @@ torch.manual_seed(args.seed)
 if args.cuda:
     torch.cuda.manual_seed(args.seed)
 
-images, all_params, labels = lister.dataloader(args.datapath)
+images, all_params, labels = lister.dataloader(args.base_dir + args.datapath)
 
 num_total = len(images)
 indices = list(range(num_total))
@@ -83,7 +83,7 @@ TestImgLoader = torch.utils.data.DataLoader(
     batch_size=1, shuffle=True, num_workers=1, drop_last=False)
 
 feature_extractor = ResNetFeatureExtractor(resnet50).cuda()
-num_features = 1000 # from ImageNet
+num_features = feature_extractor.out_dim
 model = DKLModel(feature_extractor, num_dim=num_features).cuda()
 
 if args.cuda:
@@ -141,4 +141,4 @@ for epoch in range(1, args.epochs + 1):
         test()
     state_dict = model.state_dict()
     likelihood_state_dict = likelihood.state_dict()
-    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, '/scratch/datasets/models/dkl_breakhis_checkpoint_%d.dat' % epoch)
+    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, args.base_dir + args.checkpoints + 'dkl_breakhis_checkpoint_%d.dat' % epoch)

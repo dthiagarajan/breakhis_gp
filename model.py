@@ -26,10 +26,10 @@ class ResNetFeatureExtractor(nn.Module):
     def __init__(self, resnet_type):
         super(ResNetFeatureExtractor, self).__init__()
         self.classifier = resnet_type(pretrained=True)
+        self.out_dim = self.classifier.out_dim
 
     def forward(self, x):
         features = self.classifier(x)
-        print('features.shape', features.shape)
         return features
 
 
@@ -37,7 +37,7 @@ class DKLModel(gpytorch.Module):
     def __init__(self, feature_extractor, num_dim, grid_bounds=(-10., 10.)):
         super(DKLModel, self).__init__()
         self.feature_extractor = feature_extractor
-        self.bn = nn.BatchNorm1d(1000)
+        self.bn = nn.BatchNorm1d(num_dim)
         self.gp_layer = GaussianProcessLayer(num_dim=num_dim, grid_bounds=grid_bounds)
         self.grid_bounds = grid_bounds
         self.num_dim = num_dim
