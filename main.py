@@ -60,8 +60,8 @@ train_images, train_params, train_labels = [images[i] for i in train_idx], [all_
 test_images, test_params, test_labels = [images[i] for i in test_idx], [all_params[i] for i in test_idx], [labels[i] for i in test_idx]
 
 p = Augmentor.Pipeline()
-p.rotate90(probability=1)
-p.rotate270(probability=1)
+p.rotate90(probability=.5)
+p.rotate270(probability=.5)
 p.flip_top_bottom(probability=0.8)
 p.crop_random(probability=1, percentage_area=0.5)
 
@@ -70,8 +70,8 @@ transform = transforms.Compose([
         p.torch_transform(),
         transforms.Resize((224, 224)),
         transforms.ToTensor(),
-        transforms.Normalize((0.7879, 0.6272, 0.7653),
-                             (0.1215, 0.1721, 0.1058)),
+        transforms.Normalize((0.4914, 0.4822, 0.4465),
+                             (0.2023, 0.1994, 0.2010)),
 ])
 
 TrainImgLoader = torch.utils.data.DataLoader(
@@ -90,14 +90,14 @@ if args.cuda:
     logger.info("Using CUDA")
     model.cuda()
 
-lr = 0.1
+lr = 0.01
 likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=num_features, n_classes=2).cuda()
 optimizer = optim.RMSprop([
     # {'params': model.feature_extractor.parameters(), 'lr': lr * 0.01},
     {'params': model.gp_layer.hyperparameters()},
     {'params': model.gp_layer.variational_parameters()},
     {'params': likelihood.parameters()},
-], lr=lr, weight_decay=0.9, centered=True)
+], lr=lr, momentum=0.9, weight_decay=0.9)
 scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[0.25 * args.epochs, 0.5 * args.epochs, 0.75 * args.epochs], gamma=0.1)
 
 def train(epoch):
@@ -120,7 +120,15 @@ def train(epoch):
 def test():
     model.eval()
     likelihood.eval()
-
+    train_correct = 0
+    for image, params, label in tqdm(TrainImgLoader):
+        if args.cuda:
+            image, label = image.cuda(), label.cuda()
+        with torch.no_grad():
+            distr = model(image)
+            output = likelihood(distr)
+            pred = output.probs.argmax(1)
+            train_correct += pred.eq(label.view_as(pred)).cpu().sum()
     correct = 0  
     for image, params, label in tqdm(TestImgLoader):
         if args.cuda:
@@ -130,7 +138,8 @@ def test():
             output = likelihood(distr)
             pred = output.probs.argmax(1)
             correct += pred.eq(label.view_as(pred)).cpu().sum()
-    logger.info('Test set: Accuracy: {}/{} ({}%)'.format(
+    logger.info('Train_Accuracy: {}/{} ({}%), Test_Accuracy: {}/{} ({}%)'.format(
+        train_correct, len(TrainImgLoader.dataset), 100. * train_correct / float(len(TrainImgLoader.dataset)),
         correct, len(TestImgLoader.dataset), 100. * correct / float(len(TestImgLoader.dataset))
     ))
 
