@@ -93,19 +93,20 @@ if args.cuda:
 lr = 0.01
 likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=num_features, n_classes=2).cuda()
 optimizer = optim.RMSprop([
-    # {'params': model.feature_extractor.parameters(), 'lr': lr * 0.01},
+    {'params': model.feature_extractor.parameters(), 'lr': lr * 0.01},
     {'params': model.gp_layer.hyperparameters()},
     {'params': model.gp_layer.variational_parameters()},
     {'params': likelihood.parameters()},
 ], lr=lr, momentum=0.9, weight_decay=0.9)
-scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[0.25 * args.epochs, 0.5 * args.epochs, 0.75 * args.epochs], gamma=0.1)
+scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', factor=0.1, patience=5, verbose=True)
+# scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[0.25 * args.epochs, 0.5 * args.epochs, 0.75 * args.epochs], gamma=0.1)
 
 def train(epoch):
     model.train()
     likelihood.train()
     
     mll = gpytorch.mlls.VariationalELBO(likelihood, model.gp_layer, num_data=len(TrainImgLoader))
-    train_loss = 0.
+    total_loss = 0.
     for batch_idx, (image, params, label) in enumerate(TrainImgLoader):
         start_time = time.time()
         if args.cuda:
@@ -113,9 +114,11 @@ def train(epoch):
         optimizer.zero_grad()
         output = model(image)
         loss = -mll(output, label)
+        total_loss += loss.item()
         loss.backward()
         optimizer.step()
         logger.info('Train Epoch: %d [%03d/%03d], Loss: %.6f, Time: %.3f' % (epoch, batch_idx + 1, len(TrainImgLoader), loss.item(), time.time() - start_time))
+    return total_loss
 
 def test():
     model.eval()
@@ -144,10 +147,10 @@ def test():
     ))
 
 for epoch in range(1, args.epochs + 1):
-    scheduler.step()
     with gpytorch.settings.use_toeplitz(False), gpytorch.settings.max_preconditioner_size(0):
-        train(epoch)
+        loss = train(epoch)
         test()
+        scheduler.step(loss)
     state_dict = model.state_dict()
     likelihood_state_dict = likelihood.state_dict()
     torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, args.base_dir + args.checkpoints + 'dkl_breakhis_checkpoint_%d.dat' % epoch)
