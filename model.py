@@ -1,4 +1,4 @@
-from torchvision.models import *
+from resnet import *
 import gpytorch
 import math
 import torch.nn as nn
@@ -29,6 +29,7 @@ class ResNetFeatureExtractor(nn.Module):
 
     def forward(self, x):
         features = self.classifier(x)
+        print('features.shape', features.shape)
         return features
 
 

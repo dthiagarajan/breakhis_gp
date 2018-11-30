@@ -1,5 +1,6 @@
 import argparse
 import Augmentor
+import logging
 import os
 import random
 import torch
@@ -20,8 +21,13 @@ from torchvision.models import *
 from torchvision import transforms
 from tqdm import tqdm
 
+logger = logging.getLogger()
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+console = logging.StreamHandler()
+console.setLevel(logging.INFO)
+
 parser = argparse.ArgumentParser(description='PSMNet')
-parser.add_argument('--datapath', default='/home/dthiagar/datasets/BreaKHis_v1/histology_slides/breast/',
+parser.add_argument('--datapath', default='/scratch/datasets/BreaKHis_v1/histology_slides/breast/',
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=3000,
                     help='number of epochs to train')
@@ -67,28 +73,27 @@ transform = transforms.Compose([
         transforms.Normalize((0.7879, 0.6272, 0.7653),
                              (0.1215, 0.1721, 0.1058)),
 ])
-print(len(train_images))
-print(len(test_images))
 
 TrainImgLoader = torch.utils.data.DataLoader(
     DA.ImageFolder(train_images, train_params, train_labels, True, transform=transform),
-    batch_size= 16, shuffle= True, num_workers= 0, drop_last=False)
+    batch_size= 16, shuffle= True, num_workers= 4, drop_last=False)
 
 TestImgLoader = torch.utils.data.DataLoader(
     DA.ImageFolder(test_images, test_params, test_labels, False, transform=transform),
-    batch_size=1, shuffle=True, num_workers=0, drop_last=False)
+    batch_size=1, shuffle=True, num_workers=1, drop_last=False)
 
 feature_extractor = ResNetFeatureExtractor(resnet50).cuda()
 num_features = 1000 # from ImageNet
 model = DKLModel(feature_extractor, num_dim=num_features).cuda()
 
 if args.cuda:
+    logger.info("Using CUDA")
     model.cuda()
 
 lr = 0.001
-likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=model.num_dim, n_classes=2).cuda()
+likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=num_features, n_classes=2).cuda()
 optimizer = optim.RMSprop([
-    {'params': model.feature_extractor.parameters()},
+    # {'params': model.feature_extractor.parameters()},
     {'params': model.gp_layer.hyperparameters()},
     {'params': model.gp_layer.variational_parameters()},
     {'params': likelihood.parameters()},
@@ -110,7 +115,7 @@ def train(epoch):
         loss = -mll(output, label)
         loss.backward()
         optimizer.step()
-        print('Train Epoch: %d [%03d/%03d], Loss: %.6f' % (epoch, batch_idx + 1, len(TrainImgLoader), loss.item()), flush=True)
+        logger.info('Train Epoch: %d [%03d/%03d], Loss: %.6f, Time: %.3f' % (epoch, batch_idx + 1, len(TrainImgLoader), loss.item(), time.time() - start_time))
 
 def test():
     model.eval()
@@ -121,10 +126,11 @@ def test():
         if args.cuda:
             image, label = image.cuda(), label.cuda()    
         with torch.no_grad():
-            output = likelihood(model(image))
+            distr = model(image)
+            output = likelihood(distr)
             pred = output.probs.argmax(1)
             correct += pred.eq(label.view_as(pred)).cpu().sum()
-    print('Test set: Accuracy: {}/{} ({}%)'.format(
+    logger.info('Test set: Accuracy: {}/{} ({}%)'.format(
         correct, len(TestImgLoader.dataset), 100. * correct / float(len(TestImgLoader.dataset))
     ))
 
@@ -135,4 +141,4 @@ for epoch in range(1, args.epochs + 1):
         test()
     state_dict = model.state_dict()
     likelihood_state_dict = likelihood.state_dict()
-    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, 'dkl_cifar_checkpoint.dat')
+    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict}, '/scratch/datasets/models/dkl_breakhis_checkpoint_%d.dat' % epoch)
