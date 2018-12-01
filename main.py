@@ -26,20 +26,24 @@ logging.basicConfig(level=logging.INFO, format='%(message)s')
 console = logging.StreamHandler()
 console.setLevel(logging.INFO)
 
-parser = argparse.ArgumentParser(description='PSMNet')
+parser = argparse.ArgumentParser(description='BreakHis DKL')
 parser.add_argument('--base_dir', default='/home/dthiagar/datasets/',
                     help='base_dir')
 parser.add_argument('--datapath', default='BreaKHis_v1/histology_slides/breast/',
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=3000,
                     help='number of epochs to train')
-parser.add_argument('--checkpoints', default='models/',
+parser.add_argument('--checkpoints', default='models/BreaKHis_v1/',
                     help='save model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 args = parser.parse_args()
+
+resnet_type = resnet50
+logger.info("ResNet Type: %s" % resnet_type.__name__)
+
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
 torch.manual_seed(args.seed)
@@ -82,7 +86,7 @@ TestImgLoader = torch.utils.data.DataLoader(
                    False, transform=transform),
     batch_size=1, shuffle=True, num_workers=1, drop_last=False)
 
-feature_extractor = ResNetFeatureExtractor(resnet18).cuda()
+feature_extractor = ResNetFeatureExtractor(resnet_type).cuda()
 num_features = feature_extractor.out_dim
 model = DKLModel(feature_extractor, num_dim=num_features).cuda()
 
@@ -129,7 +133,7 @@ def train(epoch):
 def test():
     model.eval()
     likelihood.eval()
-    train_correct = 0
+    train_correct, train_tp, train_fp, train_tn, train_fn = 0, 0, 0, 0, 0
     for image, params, label in tqdm(TrainImgLoader):
         if args.cuda:
             image, label = image.cuda(), label.cuda()
@@ -137,8 +141,13 @@ def test():
             distr = model(image)
             output = likelihood(distr)
             pred = output.probs.argmax(1)
+            label_comp = label.view_as(pred).cpu()
+            train_tp += ((pred == 1) == (label_comp == 1)).sum()
+            train_fp += ((pred == 1) == (label_comp == 0)).sum()
+            train_tn += ((pred == 0) == (label_comp == 0)).sum()
+            train_fn += ((pred == 0) == (label_comp == 1)).sum()
             train_correct += pred.eq(label.view_as(pred)).cpu().sum()
-    correct = 0
+    correct, tp, fp, tn, fn = 0, 0, 0, 0, 0
     for image, params, label in tqdm(TestImgLoader):
         if args.cuda:
             image, label = image.cuda(), label.cuda()
@@ -146,6 +155,11 @@ def test():
             distr = model(image)
             output = likelihood(distr)
             pred = output.probs.argmax(1)
+            label_comp = label.view_as(pred).cpu()
+            train_tp += ((pred == 1) == (label_comp == 1)).sum()
+            train_fp += ((pred == 1) == (label_comp == 0)).sum()
+            train_tn += ((pred == 0) == (label_comp == 0)).sum()
+            train_fn += ((pred == 0) == (label_comp == 1)).sum()
             correct += pred.eq(label.view_as(pred)).cpu().sum()
     logger.info('Train_Accuracy: {}/{} ({}%), Test_Accuracy: {}/{} ({}%)'.format(
         train_correct, len(TrainImgLoader.dataset), 100. *
@@ -163,4 +177,4 @@ for epoch in range(1, args.epochs + 1):
     state_dict = model.state_dict()
     likelihood_state_dict = likelihood.state_dict()
     torch.save({'model': state_dict, 'likelihood': likelihood_state_dict},
-               args.base_dir + args.checkpoints + 'dkl_breakhis_checkpoint_%d.dat' % epoch)
+               args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, epoch))
