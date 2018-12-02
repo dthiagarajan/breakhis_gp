@@ -33,6 +33,8 @@ parser.add_argument('--datapath', default='BreaKHis_v1/histology_slides/breast/'
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=3000,
                     help='number of epochs to train')
+parser.add_argument('--loadmodel', default=None,
+                    help='load model')
 parser.add_argument('--checkpoints', default='models/BreaKHis_v1/',
                     help='save model')
 parser.add_argument('--no-cuda', action='store_true', default=False,
@@ -41,7 +43,7 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 args = parser.parse_args()
 
-resnet_type = resnet50
+resnet_type = resnet101
 logger.info("ResNet Type: %s" % resnet_type.__name__)
 
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -105,8 +107,14 @@ optimizer = optim.RMSprop([
 ], lr=lr, momentum=0.9)
 scheduler = optim.lr_scheduler.ReduceLROnPlateau(
     optimizer, 'min', factor=0.9, patience=5, verbose=True)
-# scheduler = optim.lr_scheduler.MultiStepLR(optimizer, milestones=[0.25 * args.epochs, 0.5 * args.epochs, 0.75 * args.epochs], gamma=0.1)
 
+completed_epochs = 0
+if args.loadmodel:
+    print("Loading model from %s" % args.loadmodel)
+    completed_epochs = int(args.loadmodel[:-4].split('_')[-1])
+    dicts = torch.load(args.loadmodel)
+    model.load_state_dict(dicts['model'])
+    likelihood.load_state_dict(dicts['likelihood'])
 
 def train(epoch):
     model.train()
@@ -126,14 +134,14 @@ def train(epoch):
         loss.backward()
         optimizer.step()
         logger.info('Train Epoch: %d [%03d/%03d], Loss: %.6f, Time: %.3f' % (
-            epoch, batch_idx + 1, len(TrainImgLoader), loss.item(), time.time() - start_time))
+            epoch + completed_epochs, batch_idx + 1, len(TrainImgLoader), loss.item(), time.time() - start_time))
     return total_loss
 
 
 def test():
     model.eval()
     likelihood.eval()
-    train_correct, train_tp, train_fp, train_tn, train_fn = 0, 0, 0, 0, 0
+    train_correct = 0
     for image, params, label in tqdm(TrainImgLoader):
         if args.cuda:
             image, label = image.cuda(), label.cuda()
@@ -141,13 +149,8 @@ def test():
             distr = model(image)
             output = likelihood(distr)
             pred = output.probs.argmax(1)
-            label_comp = label.view_as(pred).cpu()
-            train_tp += ((pred == 1) == (label_comp == 1)).sum()
-            train_fp += ((pred == 1) == (label_comp == 0)).sum()
-            train_tn += ((pred == 0) == (label_comp == 0)).sum()
-            train_fn += ((pred == 0) == (label_comp == 1)).sum()
             train_correct += pred.eq(label.view_as(pred)).cpu().sum()
-    correct, tp, fp, tn, fn = 0, 0, 0, 0, 0
+    correct = 0
     for image, params, label in tqdm(TestImgLoader):
         if args.cuda:
             image, label = image.cuda(), label.cuda()
@@ -155,11 +158,6 @@ def test():
             distr = model(image)
             output = likelihood(distr)
             pred = output.probs.argmax(1)
-            label_comp = label.view_as(pred).cpu()
-            train_tp += ((pred == 1) == (label_comp == 1)).sum()
-            train_fp += ((pred == 1) == (label_comp == 0)).sum()
-            train_tn += ((pred == 0) == (label_comp == 0)).sum()
-            train_fn += ((pred == 0) == (label_comp == 1)).sum()
             correct += pred.eq(label.view_as(pred)).cpu().sum()
     logger.info('Train_Accuracy: {}/{} ({}%), Test_Accuracy: {}/{} ({}%)'.format(
         train_correct, len(TrainImgLoader.dataset), 100. *
@@ -169,7 +167,7 @@ def test():
     ))
 
 
-for epoch in range(1, args.epochs + 1):
+for epoch in range(1, args.epochs - completed_epochs + 1):
     with gpytorch.settings.use_toeplitz(False), gpytorch.settings.max_preconditioner_size(0):
         loss = train(epoch)
         test()
@@ -177,4 +175,4 @@ for epoch in range(1, args.epochs + 1):
     state_dict = model.state_dict()
     likelihood_state_dict = likelihood.state_dict()
     torch.save({'model': state_dict, 'likelihood': likelihood_state_dict},
-               args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, epoch))
+               args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, epoch + completed_epochs))
