@@ -1,5 +1,4 @@
 import argparse
-import Augmentor
 import os
 import random
 import torch
@@ -17,6 +16,7 @@ from dataloader import BreaKHis_v1Lister as lister
 from dataloader import BreaKHis_v1Loader as DA
 from model import *
 from resnet import *
+from sklearn.metrics import *
 from torchvision import transforms
 from tqdm import tqdm
 
@@ -25,12 +25,12 @@ parser.add_argument('--base_dir', default='/home/dthiagar/datasets/',
                     help='base_dir')
 parser.add_argument('--datapath', default='BreaKHis_v1/histology_slides/breast/',
                     help='datapath')
-parser.add_argument('--epochs', type=int, default=3000,
-                    help='number of epochs to train')
 parser.add_argument('--checkpoints', default='models/BreaKHis_v1/',
                     help='save model')
-parser.add_argument('--load', default=1,
+parser.add_argument('--load', type=int, default=None,
                     help='load model from end of that epoch')
+parser.add_argument('--batch_size', type=int, default=32,
+                    help='batch_size')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
 parser.add_argument('--seed', type=int, default=1, metavar='S',
@@ -48,6 +48,7 @@ if args.cuda:
 
 images, all_params, labels = lister.dataloader(args.base_dir + args.datapath)
 
+images, all_params, labels = images[:10], all_params[:10], labels[:10]
 
 transform = transforms.Compose([
         transforms.Resize((224, 224)),
@@ -57,15 +58,23 @@ transform = transforms.Compose([
 ])
 TrainImgLoader = torch.utils.data.DataLoader(
     DA.ImageFolder(images, all_params, labels, True, transform=transform),
-    batch_size=32, shuffle= True, num_workers= 0, drop_last=False)
+    batch_size=args.batch_size, shuffle= True, num_workers= 0, drop_last=False)
 
-feature_extractor = ResNetFeatureExtractor(resnet_type).cuda()
+feature_extractor = ResNetFeatureExtractor(resnet_type)
 num_features = feature_extractor.out_dim
-model = DKLModel(feature_extractor, num_dim=num_features).cuda()
-likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=num_features, n_classes=2).cuda()
+model = DKLModel(feature_extractor, num_dim=num_features)
+likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=num_features, n_classes=2)
+if args.cuda:
+    feature_extractor = ResNetFeatureExtractor(resnet_type).cuda()
+    model = DKLModel(feature_extractor, num_dim=num_features).cuda()
+    likelihood = gpytorch.likelihoods.SoftmaxLikelihood(num_features=num_features, n_classes=2).cuda()
+
 
 state_file = args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, args.load)
-state = torch.load(state_file)
+if args.cuda:
+    state = torch.load(state_file)
+else:
+    state = torch.load(state_file, map_location='cpu')
 model.load_state_dict(state['model'])
 likelihood.load_state_dict(state['likelihood'])
 
@@ -73,13 +82,15 @@ def analyze():
     model.eval()
     likelihood.eval()
     correct, tp, fp, tn, fn = 0, 0, 0, 0, 0
-    for image, params, label in tqdm(TrainImgLoader):
+    preds = torch.zeros(len(TrainImgLoader))
+    for i, (image, params, label) in tqdm(enumerate(TrainImgLoader)):
         if args.cuda:
             image, label = image.cuda(), label.cuda()
         with torch.no_grad():
             distr = model(image)
             output = likelihood(distr)
             pred = output.probs.argmax(1)
+            preds[i*args.batch_size:(i+1)*args.batch_size] =  pred
             label_comp = label.view_as(pred)
             tp += (((pred == 1) + (label_comp == 1)) == 2).sum()
             fp += (((pred == 1) + (label_comp == 0)) == 2).sum()

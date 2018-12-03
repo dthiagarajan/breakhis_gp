@@ -1,5 +1,4 @@
 import argparse
-import Augmentor
 import logging
 import os
 import random
@@ -33,7 +32,7 @@ parser.add_argument('--datapath', default='BreaKHis_v1/histology_slides/breast/'
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=3000,
                     help='number of epochs to train')
-parser.add_argument('--loadmodel', default=None,
+parser.add_argument('--loadmodel', type=int, default=None,
                     help='load model')
 parser.add_argument('--checkpoints', default='models/BreaKHis_v1/',
                     help='save model')
@@ -111,10 +110,11 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(
 completed_epochs = 0
 if args.loadmodel:
     print("Loading model from %s" % args.loadmodel)
-    completed_epochs = int(args.loadmodel[:-4].split('_')[-1])
-    dicts = torch.load(args.loadmodel)
-    model.load_state_dict(dicts['model'])
-    likelihood.load_state_dict(dicts['likelihood'])
+    state_file = args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, args.loadmodel)
+    state = torch.load(state_file)
+    model.load_state_dict(state['model'])
+    likelihood.load_state_dict(state['likelihood'])
+    completed_epochs = args.loadmodel
 
 def train(epoch):
     model.train()
