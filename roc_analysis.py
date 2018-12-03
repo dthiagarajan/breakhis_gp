@@ -48,14 +48,16 @@ if args.cuda:
 
 images, all_params, labels = lister.dataloader(args.base_dir + args.datapath)
 
-images, all_params, labels = images[:10], all_params[:10], labels[:10]
-
 transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-        transforms.Normalize((0.7879, 0.6272, 0.7653),
-                             (0.1215, 0.1721, 0.1058)),
+    transforms.RandomRotation(90),
+    transforms.RandomHorizontalFlip(0.8),
+    transforms.RandomResizedCrop(224),
+    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+    transforms.ToTensor(),
+    transforms.Normalize((0.4914, 0.4822, 0.4465),
+                         (0.2023, 0.1994, 0.2010)),
 ])
+
 TrainImgLoader = torch.utils.data.DataLoader(
     DA.ImageFolder(images, all_params, labels, True, transform=transform),
     batch_size=args.batch_size, shuffle= True, num_workers= 0, drop_last=False)
@@ -82,15 +84,17 @@ def analyze():
     model.eval()
     likelihood.eval()
     correct, tp, fp, tn, fn = 0, 0, 0, 0, 0
-    preds = torch.zeros(len(TrainImgLoader))
-    for i, (image, params, label) in tqdm(enumerate(TrainImgLoader)):
+    preds = torch.zeros(len(TrainImgLoader.dataset))
+    labels = torch.zeros(len(TrainImgLoader.dataset))
+    for i, (image, params, label) in tqdm(enumerate(TrainImgLoader), total=len(TrainImgLoader)):
         if args.cuda:
             image, label = image.cuda(), label.cuda()
         with torch.no_grad():
             distr = model(image)
             output = likelihood(distr)
+            preds[i*args.batch_size:(i+1)*args.batch_size] = output.probs[:, 1]
+            labels[i*args.batch_size:(i+1)*args.batch_size] = label
             pred = output.probs.argmax(1)
-            preds[i*args.batch_size:(i+1)*args.batch_size] =  pred
             label_comp = label.view_as(pred)
             tp += (((pred == 1) + (label_comp == 1)) == 2).sum()
             fp += (((pred == 1) + (label_comp == 0)) == 2).sum()
@@ -99,6 +103,12 @@ def analyze():
             correct += pred.eq(label.view_as(pred)).cpu().sum()
     print('Accuracy: {}/{} ({}%)'.format(correct, len(TrainImgLoader.dataset), 100. * correct / float(len(TrainImgLoader.dataset))))
     print('Sensitivity Values: TP {}, FP {}, TN {}, FN {}'.format(tp, fp, tn, fn))
+    labels, preds = labels.cpu().numpy(), preds.cpu().numpy()
+    fpr, tpr, thresholds = roc_curve(labels, preds)
+    print(fpr, tpr, thresholds)
+    auc = roc_auc_score(labels, preds)
+    precision, recall, pr_thresholds = precision_recall_curve(labels, preds)
+
 
 with gpytorch.settings.use_toeplitz(False), gpytorch.settings.max_preconditioner_size(0):
     analyze()
