@@ -12,6 +12,7 @@ import torch.nn.functional as F
 import numpy as np
 import time
 import math
+import matplotlib.pyplot as plt
 from dataloader import BreaKHis_v1Lister as lister
 from dataloader import BreaKHis_v1Loader as DA
 from model import *
@@ -74,6 +75,7 @@ if args.cuda:
 
 state_file = args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, args.load)
 if args.cuda:
+    print("Using CUDA")
     state = torch.load(state_file)
 else:
     state = torch.load(state_file, map_location='cpu')
@@ -105,10 +107,22 @@ def analyze():
     print('Sensitivity Values: TP {}, FP {}, TN {}, FN {}'.format(tp, fp, tn, fn))
     labels, preds = labels.cpu().numpy(), preds.cpu().numpy()
     fpr, tpr, thresholds = roc_curve(labels, preds)
-    print(fpr, tpr, thresholds)
     auc = roc_auc_score(labels, preds)
-    precision, recall, pr_thresholds = precision_recall_curve(labels, preds)
-
+    return auc, fpr, tpr, thresholds
 
 with gpytorch.settings.use_toeplitz(False), gpytorch.settings.max_preconditioner_size(0):
-    analyze()
+    auc, fpr, tpr, thresholds = analyze()
+    print(auc)
+    plt.figure()
+    lw = 2
+    plt.plot(fpr, tpr, color='darkorange',
+         lw=lw, label='ROC curve (area = %0.4f)' % auc)
+    plt.plot([0, 1], [0, 1], color='navy', lw=lw, linestyle='--')
+    plt.xlim([0.0, 1.0])
+    plt.ylim([0.0, 1.05])
+    plt.xlabel('False Positive Rate')
+    plt.ylabel('True Positive Rate')
+    plt.title("ROC Curve: %s, Epoch %d" % (resnet_type.__name__, args.load))
+    plt.legend(loc="lower right")
+    plt.savefig("dkl_breakhis_%s_%d_roc_curve.png" % (resnet_type.__name__, args.load))
+
