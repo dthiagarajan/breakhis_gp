@@ -32,6 +32,8 @@ parser.add_argument('--datapath', default='BreaKHis_v1/histology_slides/breast/'
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=3000,
                     help='number of epochs to train')
+parser.add_argument('--split', type=float, default=0.15,
+                    help='percentage of data to be used for evaluation')
 parser.add_argument('--loadmodel', type=int, default=None,
                     help='load model')
 parser.add_argument('--checkpoints', default='models/BreaKHis_v1/',
@@ -42,7 +44,7 @@ parser.add_argument('--seed', type=int, default=1, metavar='S',
                     help='random seed (default: 1)')
 args = parser.parse_args()
 
-resnet_type = resnet101
+resnet_type = resnet18
 logger.info("ResNet Type: %s" % resnet_type.__name__)
 
 args.cuda = not args.no_cuda and torch.cuda.is_available()
@@ -53,9 +55,10 @@ if args.cuda:
 
 images, all_params, labels = lister.dataloader(args.base_dir + args.datapath)
 
+logger.info("Using %.2f of data for evaluation" % args.split)
 num_total = len(images)
 indices = list(range(num_total))
-split = int(np.floor(0.15 * num_total))
+split = int(np.floor(args.split * num_total))
 
 np.random.seed(3)
 np.random.shuffle(indices)
@@ -114,6 +117,7 @@ if args.loadmodel:
     state = torch.load(state_file)
     model.load_state_dict(state['model'])
     likelihood.load_state_dict(state['likelihood'])
+    optimizer.load_state_dict(state['optimizer'])
     completed_epochs = args.loadmodel
 
 def train(epoch):
@@ -174,5 +178,6 @@ for epoch in range(1, args.epochs - completed_epochs + 1):
         scheduler.step(loss)
     state_dict = model.state_dict()
     likelihood_state_dict = likelihood.state_dict()
-    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict},
-               args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, epoch + completed_epochs))
+    optimizer_state_dict = optimizer.state_dict()
+    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict, 'optimizer': optimizer_state_dict},
+               args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d_%d.dat' % (resnet_type.__name__, int(args.split * 100), epoch + completed_epochs))
