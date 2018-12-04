@@ -42,7 +42,7 @@ parser.add_argument('--checkpoints', default='models/BreaKHis_v1/',
                     help='save model')
 parser.add_argument('--eval_train', type=bool, default=True,
                     help='evaluate train data every epoch')
-parser.add_argument('--eval_test', type=bool, default=False,
+parser.add_argument('--eval_test', type=bool, default=True,
                     help='evaluate test data every epoch')
 parser.add_argument('--no-cuda', action='store_true', default=False,
                     help='enables CUDA training')
@@ -102,6 +102,7 @@ transform = transforms.Compose([
 ])
 
 test_transform = transforms.Compose([
+    transforms.CenterCrop(224),
     transforms.ToTensor(),
     transforms.Normalize((0.4914, 0.4822, 0.4465),
                         (0.2023, 0.1994, 0.2010)),
@@ -109,12 +110,16 @@ test_transform = transforms.Compose([
 TrainImgLoader = torch.utils.data.DataLoader(
     DA.ImageFolder(train_images, train_params,
                    train_labels, True, transform=transform),
-    batch_size=10, shuffle=True, num_workers=4, drop_last=False)
+    batch_size=32, shuffle=True, num_workers=4, drop_last=False)
 
-TestImgLoader = torch.utils.data.DataLoader(
+EvalTrainImgLoader = torch.utils.data.DataLoader(
+    DA.ImageFolder(train_images, train_params, train_labels,
+                   True, transform=test_transform),
+    batch_size=128, shuffle=False, num_workers=1, drop_last=False)
+EvalTestImgLoader = torch.utils.data.DataLoader(
     DA.ImageFolder(test_images, test_params, test_labels,
                    False, transform=test_transform),
-    batch_size=1, shuffle=True, num_workers=1, drop_last=False)
+    batch_size=128, shuffle=False, num_workers=1, drop_last=False)
 
 feature_extractor = ResNetFeatureExtractor(resnet_type).cuda()
 num_features = feature_extractor.out_dim
@@ -140,7 +145,7 @@ completed_epochs = 0
 if args.loadmodel:
     logger.info("Finding model from at least epoch %s; if not that, closest to it" % args.loadmodel)
     checkpoint_dir = args.base_dir + args.checkpoints
-    max_diff = 0
+    max_diff = -np.inf
     max_epoch = args.loadmodel
     for file in os.listdir(checkpoint_dir):
         if file.endswith('.dat'):
@@ -192,7 +197,7 @@ def test(train=True, test=True):
     likelihood.eval()
     train_correct = 0
     if train:
-        for image, params, label in tqdm(TrainImgLoader):
+        for image, params, label in tqdm(EvalTrainImgLoader):
             if args.cuda:
                 image, label = image.cuda(), label.cuda()
             with torch.no_grad():
@@ -200,10 +205,10 @@ def test(train=True, test=True):
                 output = likelihood(distr)
                 pred = output.probs.argmax(1)
                 train_correct += pred.eq(label.view_as(pred)).cpu().sum()
-        logger.info('Train Accuracy: {}/{} ({}%)'.format(train_correct, len(TrainImgLoader.dataset), 100. * train_correct / float(len(TrainImgLoader.dataset))))
+        logger.info('Train Accuracy: {}/{} ({}%)'.format(train_correct, len(EvalTrainImgLoader.dataset), 100. * train_correct / float(len(EvalTrainImgLoader.dataset))))
     correct = 0
     if test:
-        for image, params, label in tqdm(TestImgLoader):
+        for image, params, label in tqdm(EvalTestImgLoader):
             if args.cuda:
                 image, label = image.cuda(), label.cuda()
             with torch.no_grad():
@@ -211,7 +216,7 @@ def test(train=True, test=True):
                 output = likelihood(distr)
                 pred = output.probs.argmax(1)
                 correct += pred.eq(label.view_as(pred)).cpu().sum()
-        logger.info('Test_Accuracy: {}/{} ({}%)'.format(correct, len(TestImgLoader.dataset), 100. * correct / float(len(TestImgLoader.dataset))))
+        logger.info('Test_Accuracy: {}/{} ({}%)'.format(correct, len(EvalTestImgLoader.dataset), 100. * correct / float(len(EvalTestImgLoader.dataset))))
 
 
 for epoch in range(1, args.epochs - completed_epochs + 1):
@@ -220,9 +225,8 @@ for epoch in range(1, args.epochs - completed_epochs + 1):
         loss = train(epoch)
         test(train=args.eval_train, test=args.eval_test)
         scheduler.step(loss)
-    if true_epoch % 25 == 0:
-        state_dict = model.state_dict()
-        likelihood_state_dict = likelihood.state_dict()
-        optimizer_state_dict = optimizer.state_dict()
-        torch.save({'model': state_dict, 'likelihood': likelihood_state_dict, 'optimizer': optimizer_state_dict},
+    state_dict = model.state_dict()
+    likelihood_state_dict = likelihood.state_dict()
+    optimizer_state_dict = optimizer.state_dict()
+    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict, 'optimizer': optimizer_state_dict},
                 args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d_%d.dat' % (resnet_type.__name__, int(args.split * 100), epoch + completed_epochs))
