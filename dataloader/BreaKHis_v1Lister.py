@@ -22,11 +22,11 @@ def is_image_file(filename):
     return any(filename.endswith(extension) for extension in IMG_EXTENSIONS)
 
 def dataloader(filepath):
-    images = []
-    params = []
-    labels = []
+    images = [[], []]
+    params = [[], []]
+    labels = [[], []]
 
-    for cls in classes:
+    for i, cls in enumerate(classes):
         for hist in classes[cls]:
             curr_dir = filepath + cls + '/' + hist
             for sub_dir in os.listdir(curr_dir):
@@ -39,7 +39,7 @@ def dataloader(filepath):
                         attr['magnification'] = magnification
                         attr['image_num'] = image.split(".")[0][-3:]
                         image_path = magnification_dir + image
-                        images.append(image_path)
-                        params.append(attr)
-                        labels.append(cls)
+                        images[i].append(image_path)
+                        params[i].append(attr)
+                        labels[i].append(cls)
     return images, params, labels
