@@ -29,7 +29,7 @@ parser = argparse.ArgumentParser(description='BreakHis DKL')
 parser.add_argument('--base_dir', default='/home/dthiagar/datasets/',
                     help='base_dir')
 parser.add_argument('--resnet', type=int, default=18,
-                    help'resnet model to use')
+                    help='resnet model to use')
 parser.add_argument('--datapath', default='BreaKHis_v1/histology_slides/breast/',
                     help='datapath')
 parser.add_argument('--epochs', type=int, default=3000,
@@ -63,7 +63,7 @@ if args.cuda:
 
 images, all_params, labels = lister.dataloader(args.base_dir + args.datapath)
 benign_images, malignant_images = images
-benign_params, malignant_params = params
+benign_params, malignant_params = all_params
 benign_labels, malignant_labels = labels
 
 logger.info("Using %.2f of data for evaluation" % args.split)
@@ -75,16 +75,20 @@ np.random.seed(3)
 np.random.shuffle(benign_indices)
 np.random.shuffle(malignant_indices)
 
-train_idx, test_idx = indices[benign_split:], indices[:benign_split]
-malignant_train_idx, malignant_test_idx = indices[malignant_split:], indices[:malignant_split]
+train_idx, test_idx = benign_indices[benign_split:], benign_indices[:benign_split]
+malignant_train_idx, malignant_test_idx = [num_benign_total + i for i in malignant_indices[malignant_split:]], [num_benign_total + i for i in malignant_indices[:malignant_split]]
 train_idx.extend(malignant_train_idx)
 test_idx.extend(malignant_test_idx)
+
+images[0].extend(images[1])
+all_params[0].extend(all_params[1])
+labels[0].extend(labels[1])
+images, all_params, labels = images[0], all_params[0], labels[0]
 
 train_images, train_params, train_labels = [images[i] for i in train_idx], [
     all_params[i] for i in train_idx], [labels[i] for i in train_idx]
 test_images, test_params, test_labels = [images[i] for i in test_idx], [
     all_params[i] for i in test_idx], [labels[i] for i in test_idx]
-
 
 transform = transforms.Compose([
     transforms.RandomRotation(90),
@@ -133,15 +137,16 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(
 
 completed_epochs = 0
 if args.loadmodel:
-    logger.info("Loading model from at least epoch %s" % args.loadmodel)
+    logger.info("Finding model from at least epoch %s" % args.loadmodel)
     checkpoint_dir = args.base_dir + args.checkpoints
     max_epoch = args.loadmodel
     for file in os.listdir(checkpoint_dir):
         if file.endswith('.dat'):
             l = file[:-4].split('_')
             rn_type, epoch = l[2], int(l[-1])
-            if (rn_type = resnet_type.__name__) and (epoch > max_epoch):
+            if (rn_type == resnet_type.__name__) and (epoch > max_epoch):
                 max_epoch = epoch
+    logger.info("Found model at epoch %s" % max_epoch)    
     state_split_file = args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d_%d.dat' % (resnet_type.__name__, int(args.split * 100), max_epoch)
     state_file = args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, max_epoch)
     if os.path.isfile(state_split_file):
