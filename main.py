@@ -90,6 +90,7 @@ train_images, train_params, train_labels = [images[i] for i in train_idx], [
 test_images, test_params, test_labels = [images[i] for i in test_idx], [
     all_params[i] for i in test_idx], [labels[i] for i in test_idx]
 
+
 transform = transforms.Compose([
     transforms.RandomRotation(90),
     transforms.RandomHorizontalFlip(0.8),
@@ -137,16 +138,19 @@ scheduler = optim.lr_scheduler.ReduceLROnPlateau(
 
 completed_epochs = 0
 if args.loadmodel:
-    logger.info("Finding model from at least epoch %s" % args.loadmodel)
+    logger.info("Finding model from at least epoch %s; if not that, closest to it" % args.loadmodel)
     checkpoint_dir = args.base_dir + args.checkpoints
+    max_diff = 0
     max_epoch = args.loadmodel
     for file in os.listdir(checkpoint_dir):
         if file.endswith('.dat'):
             l = file[:-4].split('_')
             rn_type, epoch = l[2], int(l[-1])
-            if (rn_type == resnet_type.__name__) and (epoch > max_epoch):
+            diff = epoch - args.loadmodel
+            if (rn_type == resnet_type.__name__) and (diff > max_diff):
+                max_diff = diff
                 max_epoch = epoch
-    logger.info("Found model at epoch %s" % max_epoch)    
+    logger.info("Loading from model at epoch %s" % max_epoch)
     state_split_file = args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d_%d.dat' % (resnet_type.__name__, int(args.split * 100), max_epoch)
     state_file = args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d.dat' % (resnet_type.__name__, max_epoch)
     if os.path.isfile(state_split_file):
@@ -211,12 +215,14 @@ def test(train=True, test=True):
 
 
 for epoch in range(1, args.epochs - completed_epochs + 1):
+    true_epoch = epoch + completed_epochs
     with gpytorch.settings.use_toeplitz(False), gpytorch.settings.max_preconditioner_size(0):
         loss = train(epoch)
         test(train=args.eval_train, test=args.eval_test)
         scheduler.step(loss)
-    state_dict = model.state_dict()
-    likelihood_state_dict = likelihood.state_dict()
-    optimizer_state_dict = optimizer.state_dict()
-    torch.save({'model': state_dict, 'likelihood': likelihood_state_dict, 'optimizer': optimizer_state_dict},
-               args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d_%d.dat' % (resnet_type.__name__, int(args.split * 100), epoch + completed_epochs))
+    if true_epoch % 25 == 0:
+        state_dict = model.state_dict()
+        likelihood_state_dict = likelihood.state_dict()
+        optimizer_state_dict = optimizer.state_dict()
+        torch.save({'model': state_dict, 'likelihood': likelihood_state_dict, 'optimizer': optimizer_state_dict},
+                args.base_dir + args.checkpoints + 'dkl_breakhis_%s_checkpoint_%d_%d.dat' % (resnet_type.__name__, int(args.split * 100), epoch + completed_epochs))
